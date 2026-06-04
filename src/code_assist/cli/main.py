@@ -1,4 +1,6 @@
 from pathlib import Path
+import shutil
+import subprocess
 
 import typer
 
@@ -165,20 +167,51 @@ def agent_edit(
     chat_model: str | None = typer.Option(None, envvar="CODE_ASSIST_CHAT_MODEL"),
     embed_model: str | None = typer.Option(None, envvar="CODE_ASSIST_EMBED_MODEL"),
     apply: bool = False,
+    allow_rewrite: bool = False,
+    open_diff: bool = True,
 ) -> None:
     """Propose edits for a file and optionally apply them."""
     config = load_model_config(root)
     chat_model = chat_model or config.chat_model
     embed_model = embed_model or config.embed_model
-    result = propose_edit(
-        root,
-        Path(path),
-        instruction,
-        chat_model=chat_model,
-        embed_model=embed_model,
-    )
+    try:
+        result = propose_edit(
+            root,
+            Path(path),
+            instruction,
+            chat_model=chat_model,
+            embed_model=embed_model,
+            allow_rewrite=allow_rewrite,
+        )
+    except ValueError as exc:
+        typer.echo(f"Edit rejected: {exc}", err=True)
+        raise typer.Exit(code=1)
     typer.echo(result.diff or "(no changes)")
     if not result.diff:
+        return
+    edits_dir = root / ".ai-copilot" / "edits"
+    edits_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = Path(path).as_posix().replace("/", "__") + ".diff"
+    diff_path = edits_dir / safe_name
+    diff_path.write_text(result.diff, encoding="utf-8")
+    typer.echo(f"Diff saved to {diff_path}")
+    updated_path = diff_path.with_suffix(".updated")
+    updated_path.write_text(result.updated_content, encoding="utf-8")
+    if open_diff:
+        code_bin = shutil.which("code")
+        if code_bin:
+            subprocess.run(
+                [code_bin, "--diff", str(root / path), str(updated_path)],
+                check=False,
+            )
+        else:
+            typer.echo(
+                "VS Code CLI not found. Install it via 'Shell Command: Install code command in PATH'.",
+                err=True,
+            )
+    if result.syntax_error:
+        typer.echo(f"Edit warning: {result.syntax_error}", err=True)
+        typer.echo("Not applying changes due to syntax error.", err=True)
         return
     if apply or typer.confirm("Apply these changes?"):
         (root / path).write_text(result.updated_content, encoding="utf-8")

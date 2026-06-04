@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-DEFAULT_CHAT_MODEL = "gemma4:e4b"
+DEFAULT_CHAT_MODEL = "qwen2.5:3b"
 DEFAULT_EMBED_MODEL = "nomic-embed-text"
 
 
